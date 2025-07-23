@@ -2,27 +2,31 @@
 Point d'entrée principal de l'application d'analyse de crypto-monnaies.
 """
 import os
+import sys
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 
-from src.data.collectors.api_collector import ApiCollector
-from src.data.storage.database import Database
-from src.analysis.preprocessing import clean_data, normalize_data, prepare_time_series, split_data
-from src.analysis.indicators import add_all_indicators
-from src.models.training import Training
-from src.models.prediction import Prediction
-import src.config as config
-from src.models.hyperparameter_tuning import grid_search, data_augmentation
+# Ajouter le répertoire parent au PATH pour les imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def collect_data(symbols=None, days=730, use_api=True, save_to_db=True):
+from data.collectors.api_collector import ApiCollector
+from data.collectors.yfinance_collector import YFinanceCollector
+from data.storage.database import Database
+from analysis.preprocessing import clean_data, normalize_data, prepare_time_series, split_data
+from analysis.indicators import add_all_indicators
+from models.training import Training
+from models.prediction import Prediction
+import config
+
+def collect_data(symbols=None, days=365, use_api=True, save_to_db=True):
     """
     Collecte des données historiques pour les crypto-monnaies spécifiées.
     
     Args:
         symbols (list): Liste des symboles des crypto-monnaies.
-        days (int): Nombre de jours d'historique à récupérer (augmenté à 2 ans).
+        days (int): Nombre de jours d'historique à récupérer.
         use_api (bool): Si True, utilise l'API, sinon essaie de récupérer de la DB.
         save_to_db (bool): Si True, sauvegarde les données dans la base de données.
         
@@ -34,7 +38,11 @@ def collect_data(symbols=None, days=730, use_api=True, save_to_db=True):
     
     data_dict = {}
     
-    # Initialiser le collecteur d'API
+    # Initialiser le collecteur alternatif (YFinance) qui est plus fiable
+    print("🔧 Utilisation de Yahoo Finance pour les données...")
+    yf_collector = YFinanceCollector()
+    
+    # Initialiser aussi l'API collector comme fallback
     api_url = config.API_ENDPOINTS[config.DEFAULT_API]
     api_collector = ApiCollector(api_url=api_url)
     
@@ -44,53 +52,53 @@ def collect_data(symbols=None, days=730, use_api=True, save_to_db=True):
     for symbol in symbols:
         print(f"Collecte des données pour {symbol}...")
         
-        if use_api:
-            try:
-                # Récupérer les données depuis l'API
-                df = api_collector.fetch_data(symbol, days=days)
-                print(f"  ✓ Données récupérées de l'API: {len(df)} entrées")
+        try:
+            if use_api:
+                # Essayer d'abord YFinance (plus fiable)
+                try:
+                    data = yf_collector.fetch_data(symbol, days=days)
+                    if data is not None and not data.empty:
+                        print(f"  ✓ {len(data)} points de données collectés depuis Yahoo Finance")
+                        data_dict[symbol] = data
+                        continue
+                except Exception as yf_error:
+                    print(f"  ⚠️ Yahoo Finance échec, essai avec l'API principale")
                 
-                # Sauvegarder dans la base de données si nécessaire
-                if save_to_db:
-                    db.insert_data(f"{symbol.lower()}_data", df)
-                    print(f"  ✓ Données sauvegardées dans la base de données")
-                
-                data_dict[symbol] = df
-                
-            except Exception as e:
-                print(f"  ✗ Erreur lors de la récupération depuis l'API: {e}")
-                
-                # Essayer de récupérer depuis la base de données
-                print(f"  ⟳ Tentative de récupération depuis la base de données...")
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=days)
-                df = db.fetch_data(symbol, start_date, end_date)
-                
-                if not df.empty:
-                    print(f"  ✓ Données récupérées de la base de données: {len(df)} entrées")
-                    data_dict[symbol] = df
-                else:
-                    print(f"  ✗ Aucune donnée disponible pour {symbol}")
-        else:
-            # Récupérer directement depuis la base de données
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=days)
-            df = db.fetch_data(symbol, start_date, end_date)
-            
-            if not df.empty:
-                print(f"  ✓ Données récupérées de la base de données: {len(df)} entrées")
-                data_dict[symbol] = df
+                # Fallback vers l'API principale
+                try:
+                    data = api_collector.fetch_data(symbol, days=365)  # Limité à 365 jours
+                    if data is not None and not data.empty:
+                        print(f"  ✓ {len(data)} points de données collectés depuis l'API")
+                        data_dict[symbol] = data
+                    else:
+                        print(f"  ✗ Aucune donnée reçue de l'API pour {symbol}")
+                except Exception as api_error:
+                    print(f"  ✗ Erreur API: {api_error}")
             else:
-                print(f"  ✗ Aucune donnée disponible pour {symbol} dans la base de données")
+                # Essayer de charger depuis la DB
+                try:
+                    data = db.get_price_data(symbol, days=days)
+                    if data is not None and not data.empty:
+                        print(f"  ✓ {len(data)} points de données chargés depuis la DB")
+                        data_dict[symbol] = data
+                    else:
+                        print(f"  ✗ Aucune donnée trouvée en DB pour {symbol}")
+                except Exception:
+                    print(f"  ✗ Erreur lors de la lecture de la DB pour {symbol}")
+                    
+        except Exception as e:
+            print(f"  ✗ Erreur lors de la collecte pour {symbol}: {e}")
+            continue
     
     return data_dict
 
 def preprocess_data(data_dict):
     """
-    Prétraite les données pour l'analyse.
+    Prétraite les données collectées en ajoutant des indicateurs techniques
+    et en nettoyant les données.
     
     Args:
-        data_dict (dict): Dictionnaire de DataFrames contenant les données par symbole.
+        data_dict (dict): Dictionnaire de DataFrames de données brutes.
         
     Returns:
         dict: Dictionnaire de DataFrames prétraités.
@@ -145,204 +153,22 @@ def train_models(data_dict, window_size=60, forecast_horizon=1):
         y = y.astype(np.float32)
         print(f"  ✓ Données de séries temporelles préparées: {len(X)} échantillons")
         
-        # Diviser les données en ensembles d'entraînement et de test
+        if len(X) == 0:
+            print(f"  ✗ Pas assez de données pour {symbol}, passage au suivant")
+            continue
+        
+        # Étape 6: Diviser les données en ensembles d'entraînement et de test
         X_train, X_test, y_train, y_test = split_data(X, y, train_ratio=0.8)
         print(f"  ✓ Données divisées: {len(X_train)} échantillons d'entraînement, {len(X_test)} échantillons de test")
         
-        # Créer et entraîner le modèle
-        input_shape = (X_train.shape[1], X_train.shape[2])
-        output_shape = y_train.shape[1] if len(y_train.shape) > 1 else 1
+        # Étape 7: Créer et entraîner le modèle
+        trainer = Training(model=None, data=(X_train, y_train))
+        model = trainer.create_lstm_model(input_shape=(X_train.shape[1], X_train.shape[2]))
         
-        # Créer un modèle
-        from tensorflow.keras.models import Sequential
-        from tensorflow.keras.layers import LSTM, Dense, Dropout
+        # Configurer l'entraînement
+        batch_size = 32
         
-        model = Sequential()
-        model.add(LSTM(64, input_shape=input_shape, return_sequences=True))
-        model.add(Dropout(0.2))
-        model.add(LSTM(32))
-        model.add(Dropout(0.2))
-        model.add(Dense(output_shape))
-        model.compile(optimizer='adam', loss='mean_squared_error')
-        
-        # Entraîner le modèle
-        trainer = Training(model=model, data=(X_train, y_train))
-        history = trainer.train(epochs=50, batch_size=32, validation_split=0.2)
-        print(f"  ✓ Modèle entraîné")
-        
-        # Sauvegarder le modèle et les données
-        models[symbol] = {
-            'model': trainer.get_model(),
-            'data': {
-                'X_test': X_test,
-                'y_test': y_test,
-                'dates': df.index[-len(X_test):]
-            }
-        }
-    
-    return models
-
-def evaluate_models(models):
-    """
-    Évalue les performances des modèles.
-    
-    Args:
-        models (dict): Dictionnaire contenant les modèles et les données de test.
-    """
-    for symbol, model_data in models.items():
-        print(f"Évaluation du modèle pour {symbol}...")
-        
-        model = model_data['model']
-        X_test = model_data['data']['X_test']
-        y_test = model_data['data']['y_test']
-        dates = model_data['data']['dates']
-        
-        # Créer un objet de prédiction
-        predictor = Prediction(model=model)
-        
-        # Évaluer le modèle
-        metrics = predictor.evaluate(X_test, y_test)
-        print(f"  ✓ Métriques:")
-        print(f"    - RMSE: {metrics['rmse']:.2f}")
-        print(f"    - MAE: {metrics['mae']:.2f}")
-        print(f"    - MAPE: {metrics['mape']:.2f}%")
-        print(f"    - R²: {metrics['r2']:.4f}")
-        
-        # Tracer les prédictions
-        plt_obj = predictor.plot_predictions(X_test, y_test, dates, 
-                                           title=f"Prédictions vs Réalité pour {symbol}")
-        
-        # Sauvegarder le graphique
-        os.makedirs("outputs", exist_ok=True)
-        plt_obj.savefig(f"outputs/{symbol}_predictions.png")
-        print(f"  ✓ Graphique sauvegardé dans outputs/{symbol}_predictions.png")
-        plt_obj.close()
-
-def main():
-    """
-    Fonction principale de l'application.
-    """
-    print("=== Démarrage de l'analyse des crypto-monnaies ===")
-    
-    # Collecter les données (augmenté à 2 ans d'historique)
-    data_dict = collect_data(days=730)
-    
-    # Prétraiter les données
-    processed_data = preprocess_data(data_dict)
-    
-    # Sélectionner un symbole pour l'optimisation des hyperparamètres (pour gagner du temps)
-    symbol_for_tuning = "BTC"
-    df = processed_data[symbol_for_tuning]
-    
-    # Nettoyer et normaliser
-    df_numeric = df.select_dtypes(include=['number']).copy()
-    df_numeric = df_numeric.fillna(0)
-    df_norm = normalize_data(df_numeric)
-    
-    # Préparer les données pour différentes fenêtres
-    window_size = 30  # Pour la préparation initiale
-    X, y = prepare_time_series(df_norm, 'price', window_size, 1)
-    X = X.astype(np.float32)
-    y = y.astype(np.float32)
-    
-    # Augmenter les données
-    X_augmented, y_augmented = data_augmentation(X, y)
-    
-    # Diviser les données
-    split_idx = int(len(X_augmented) * 0.8)
-    X_train, X_val = X_augmented[:split_idx], X_augmented[split_idx:]
-    y_train, y_val = y_augmented[:split_idx], y_augmented[split_idx:]
-    
-    print("Optimisation des hyperparamètres...")
-    tuning_results = grid_search(X_train, y_train, X_val, y_val)
-    
-    print("\nMeilleurs hyperparamètres trouvés:")
-    for param, value in tuning_results['best_params'].items():
-        print(f"  - {param}: {value}")
-    print(f"  - RMSE: {tuning_results['best_score']:.4f}")
-    
-    # Sauvegarder l'analyse des hyperparamètres
-    tuning_results['results_df'].to_csv('outputs/hyperparameter_results.csv')
-    
-    print("\nEntraînement des modèles avec les meilleurs hyperparamètres...")
-    # Récupérer les meilleurs paramètres
-    best_window = tuning_results['best_params']['window_size']
-    best_lstm_units = tuning_results['best_params']['lstm_units']
-    best_dropout = tuning_results['best_params']['dropout'] 
-    best_lr = tuning_results['best_params']['learning_rate']
-    best_batch = tuning_results['best_params']['batch_size']
-    
-    # Entraîner les modèles
-    models = train_models_with_params(processed_data, best_window, best_lstm_units, 
-                                      best_dropout, best_lr, best_batch)
-    
-    # Évaluer les modèles
-    evaluate_models(models)
-    
-    print("=== Analyse terminée ===")
-
-def train_models_with_params(data_dict, window_size, lstm_units, dropout, learning_rate, batch_size):
-    """
-    Entraîne des modèles avec les hyperparamètres optimisés.
-    """
-    models = {}
-    
-    for symbol, df in data_dict.items():
-        print(f"Entraînement du modèle pour {symbol} avec paramètres optimisés...")
-        
-        # Étape 1: S'assurer que toutes les colonnes sont numériques
-        numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
-        df_numeric = df[numeric_columns].copy()
-        df_numeric = df_numeric.fillna(0)
-        
-        # Étape 2: Normaliser les données
-        df_norm = normalize_data(df_numeric)
-        print(f"  ✓ Données normalisées")
-        
-        # Étape 3: Préparer les données pour l'entraînement
-        X, y = prepare_time_series(df_norm, 'price', window_size, 1)
-        X = X.astype(np.float32)
-        y = y.astype(np.float32)
-        print(f"  ✓ Données de séries temporelles préparées: {len(X)} échantillons")
-        
-        # Étape 4: Augmenter les données
-        X_augmented, y_augmented = data_augmentation(X, y)
-        
-        # Étape 5: Diviser les données en ensembles d'entraînement et de test
-        X_train, X_test, y_train, y_test = split_data(X_augmented, y_augmented, train_ratio=0.8)
-        print(f"  ✓ Données divisées: {len(X_train)} échantillons d'entraînement, {len(X_test)} échantillons de test")
-        
-        # Étape 6: Créer un modèle avec les hyperparamètres optimisés
-        from tensorflow.keras.models import Sequential
-        from tensorflow.keras.layers import LSTM, Dense, Dropout
-        from tensorflow.keras.optimizers import Adam
-        
-        model = Sequential()
-        
-        # Première couche LSTM
-        model.add(LSTM(lstm_units[0], 
-                      input_shape=(X_train.shape[1], X_train.shape[2]), 
-                      return_sequences=len(lstm_units) > 1))
-        model.add(Dropout(dropout))
-        
-        # Couches LSTM intermédiaires
-        for i in range(1, len(lstm_units)-1):
-            model.add(LSTM(lstm_units[i], return_sequences=True))
-            model.add(Dropout(dropout))
-        
-        # Dernière couche LSTM
-        if len(lstm_units) > 1:
-            model.add(LSTM(lstm_units[-1], return_sequences=False))
-            model.add(Dropout(dropout))
-        
-        # Couche de sortie
-        model.add(Dense(1))
-        
-        # Compiler le modèle
-        optimizer = Adam(learning_rate=learning_rate)
-        model.compile(optimizer=optimizer, loss='mean_squared_error')
-        
-        # Entraîner le modèle
+        # Ajouter early stopping pour éviter le surajustement
         from tensorflow.keras.callbacks import EarlyStopping
         early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
         
@@ -368,5 +194,134 @@ def train_models_with_params(data_dict, window_size, lstm_units, dropout, learni
     
     return models
 
+def generate_predictions(models, data_dict):
+    """
+    Génère des prédictions pour chaque modèle.
+    
+    Args:
+        models (dict): Dictionnaire des modèles entraînés
+        data_dict (dict): Dictionnaire des données
+        
+    Returns:
+        dict: Prédictions pour chaque symbole
+    """
+    predictions = {}
+    
+    for symbol, model_data in models.items():
+        print(f"Génération des prédictions pour {symbol}...")
+        
+        model = model_data['model']
+        X_test = model_data['data']['X_test']
+        y_test = model_data['data']['y_test']
+        
+        # Créer un objet de prédiction
+        predictor = Prediction(model=model)
+        
+        # Générer les prédictions
+        y_pred = predictor.predict(X_test)
+        
+        predictions[symbol] = {
+            'predictions': y_pred,
+            'actual': y_test,
+            'dates': model_data['data']['dates']
+        }
+        
+        print(f"  ✓ Prédictions générées pour {symbol}")
+    
+    return predictions
+
+def visualize_results(models, data_dict, predictions):
+    """
+    Visualise les résultats des prédictions.
+    
+    Args:
+        models (dict): Dictionnaire des modèles entraînés
+        data_dict (dict): Dictionnaire des données
+        predictions (dict): Dictionnaire des prédictions
+    """
+    # Créer le dossier outputs s'il n'existe pas
+    outputs_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "outputs")
+    os.makedirs(outputs_dir, exist_ok=True)
+    
+    for symbol in predictions.keys():
+        print(f"Visualisation des résultats pour {symbol}...")
+        
+        model_data = models[symbol]
+        model = model_data['model']
+        X_test = model_data['data']['X_test']
+        y_test = model_data['data']['y_test']
+        dates = model_data['data']['dates']
+        
+        # Créer un objet de prédiction
+        predictor = Prediction(model=model)
+        
+        # Évaluer le modèle
+        metrics = predictor.evaluate(X_test, y_test)
+        print(f"  ✓ Métriques pour {symbol}:")
+        print(f"    - RMSE: {metrics['rmse']:.2f}")
+        print(f"    - MAE: {metrics['mae']:.2f}")
+        print(f"    - MAPE: {metrics['mape']:.2f}%")
+        print(f"    - R²: {metrics['r2']:.4f}")
+        
+        # Tracer les prédictions
+        plt_obj = predictor.plot_predictions(X_test, y_test, dates, 
+                                           title=f"Prédictions vs Réalité pour {symbol}")
+        
+        # Sauvegarder le graphique
+        output_path = os.path.join(outputs_dir, f"{symbol}_predictions.png")
+        plt_obj.savefig(output_path)
+        print(f"  ✓ Graphique sauvegardé : {output_path}")
+        plt_obj.close()
+
+def main():
+    """Fonction principale pour lancer l'analyse complète"""
+    print("🚀 Lancement du Crypto AI Analyzer")
+    print("=" * 50)
+    
+    try:
+        # 1. Collecte des données
+        print("📊 Collecte des données...")
+        data_dict = collect_data()
+        
+        if not data_dict:
+            print("❌ Aucune donnée collectée. Arrêt du programme.")
+            return 1
+        
+        # 2. Prétraitement des données
+        print("🔧 Prétraitement des données...")
+        processed_data = preprocess_data(data_dict)
+        
+        if not processed_data:
+            print("❌ Aucune donnée prétraitée. Arrêt du programme.")
+            return 1
+        
+        # 3. Entraînement des modèles
+        print("🤖 Entraînement des modèles...")
+        models = train_models(processed_data)
+        
+        if not models:
+            print("❌ Aucun modèle entraîné. Arrêt du programme.")
+            return 1
+        
+        # 4. Génération des prédictions
+        print("🔮 Génération des prédictions...")
+        predictions = generate_predictions(models, processed_data)
+        
+        # 5. Visualisation des résultats
+        print("📈 Génération des graphiques...")
+        visualize_results(models, processed_data, predictions)
+        
+        print("✅ Analyse terminée avec succès !")
+        print("📁 Vérifiez le dossier 'outputs/' pour les résultats")
+        
+    except Exception as e:
+        print(f"❌ Erreur lors de l'exécution : {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+    
+    return 0
+
 if __name__ == "__main__":
-    main()
+    exit_code = main()
+    sys.exit(exit_code)
