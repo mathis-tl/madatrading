@@ -11,7 +11,7 @@ from pathlib import Path
 
 def test_basic_imports():
     """Test des imports de base Python"""
-    print("🧪 Test des imports de base...")
+    print(" Test des imports de base...")
     basic_modules = [
         ('os', 'Système d\'exploitation'),
         ('sys', 'Système Python'),
@@ -25,16 +25,16 @@ def test_basic_imports():
     for module, desc in basic_modules:
         try:
             importlib.import_module(module)
-            print(f"  ✅ {module} - {desc}")
+            print(f"   {module} - {desc}")
             success += 1
         except ImportError as e:
-            print(f"  ❌ {module} - Erreur: {e}")
+            print(f"   {module} - Erreur: {e}")
     
     return success == len(basic_modules)
 
 def test_third_party_imports():
     """Test des imports de bibliothèques tierces"""
-    print("\n📦 Test des bibliothèques tierces...")
+    print("\n Test des bibliothèques tierces...")
     third_party = [
         ('numpy', 'Calculs numériques'),
         ('pandas', 'Manipulation de données'),
@@ -51,19 +51,19 @@ def test_third_party_imports():
     for module, desc in third_party:
         try:
             importlib.import_module(module)
-            print(f"  ✅ {module} - {desc}")
+            print(f"   {module} - {desc}")
             success += 1
         except ImportError as e:
-            print(f"  ❌ {module} - Erreur: {e}")
+            print(f"   {module} - Erreur: {e}")
     
     # Test des modules optionnels
     for module, desc in optional_modules:
         try:
             importlib.import_module(module)
-            print(f"  ✅ {module} - {desc}")
+            print(f"   {module} - {desc}")
             optional_success += 1
         except ImportError as e:
-            print(f"  ⚠️ {module} - {desc} - Pas installé (normal)")
+            print(f"  ⚠ {module} - {desc} - Pas installé (normal)")
     
     return success >= len(third_party) - 1  # On accepte 1 échec
 
@@ -91,24 +91,24 @@ def test_project_structure():
     print("  Fichiers requis:")
     for file in required_files:
         if os.path.exists(file):
-            print(f"    ✅ {file}")
+            print(f"    {file}")
             success += 1
         else:
-            print(f"    ❌ {file} - Manquant")
+            print(f"     {file} - Manquant")
     
     print("  Dossiers requis:")
     for directory in required_dirs:
         if os.path.exists(directory):
-            print(f"    ✅ {directory}")
+            print(f"     {directory}")
             success += 1
         else:
-            print(f"    ❌ {directory} - Manquant")
+            print(f"     {directory} - Manquant")
     
     return success == len(required_files) + len(required_dirs)
 
 def test_crypto_ai_imports():
     """Test des imports du module crypto-ai-analyzer"""
-    print("\n🤖 Test des imports crypto-ai-analyzer...")
+    print("\n Test des imports crypto-ai-analyzer...")
     
     # Ajouter le chemin vers le module
     crypto_path = os.path.join(os.getcwd(), 'crypto-ai-analyzer', 'src')
@@ -129,16 +129,16 @@ def test_crypto_ai_imports():
     for module, desc in test_imports:
         try:
             importlib.import_module(module)
-            print(f"  ✅ {module} - {desc}")
+            print(f"   {module} - {desc}")
             success += 1
         except ImportError as e:
-            print(f"  ❌ {module} - {desc} - Erreur: {e}")
+            print(f"   {module} - {desc} - Erreur: {e}")
     
     return success >= len(test_imports) - 2  # On accepte 2 échecs
 
 def test_launchers():
     """Test que les scripts de lancement existent et sont exécutables"""
-    print("\n🚀 Test des scripts de lancement...")
+    print("\n Test des scripts de lancement...")
     
     launchers = [
         ('launcher.py', 'Menu principal'),
@@ -153,12 +153,12 @@ def test_launchers():
             with open(script, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
                 if content and ('def ' in content or 'import ' in content):
-                    print(f"  ✅ {script} - {desc}")
+                    print(f"   {script} - {desc}")
                     success += 1
                 else:
-                    print(f"  ⚠️ {script} - {desc} - Fichier vide ou invalide")
+                    print(f"  ⚠ {script} - {desc} - Fichier vide ou invalide")
         else:
-            print(f"  ❌ {script} - {desc} - Manquant")
+            print(f"   {script} - {desc} - Manquant")
     
     return success == len(launchers)
 
@@ -187,43 +187,43 @@ def generate_summary_report():
             print(f"Erreur lors du test {test_name}: {e}")
             results.append((test_name, False))
     
-    print(f"\n🏆 RÉSULTATS FINAUX:")
+    print(f"\n RÉSULTATS FINAUX:")
     for test_name, result in results:
-        status = "✅ SUCCÈS" if result else "❌ ÉCHEC"
+        status = " SUCCÈS" if result else "❌ ÉCHEC"
         print(f"  {status} - {test_name}")
     
     score_percentage = (total_score / len(tests)) * 100
-    print(f"\n📊 Score total: {total_score}/{len(tests)} ({score_percentage:.1f}%)")
+    print(f"\n Score total: {total_score}/{len(tests)} ({score_percentage:.1f}%)")
     
     if score_percentage >= 80:
-        print("🎉 EXCELLENT! Le projet est prêt pour la portabilité!")
+        print(" EXCELLENT! Le projet est prêt pour la portabilité!")
         return True
     elif score_percentage >= 60:
-        print("⚠️ CORRECT. Quelques améliorations recommandées.")
+        print("⚠ CORRECT. Quelques améliorations recommandées.")
         return True
     else:
-        print("❌ PROBLÈMES DÉTECTÉS. Corrections nécessaires.")
+        print(" PROBLÈMES DÉTECTÉS. Corrections nécessaires.")
         return False
 
 def main():
     """Fonction principale de vérification"""
-    print("🔍 VÉRIFICATION DE LA PORTABILITÉ DU PROJET MADATRADING")
+    print(" VÉRIFICATION DE LA PORTABILITÉ DU PROJET MADATRADING")
     print("=" * 60)
-    print(f"📍 Répertoire de travail: {os.getcwd()}")
-    print(f"🐍 Version Python: {sys.version}")
-    print(f"💻 Plateforme: {sys.platform}")
+    print(f" Répertoire de travail: {os.getcwd()}")
+    print(f" Version Python: {sys.version}")
+    print(f" Plateforme: {sys.platform}")
     
     success = generate_summary_report()
     
     if success:
-        print("\n✅ Le projet est prêt à être partagé sur GitHub!")
-        print("\n📝 Instructions pour l'utilisateur final:")
+        print("\n Le projet est prêt à être partagé sur GitHub!")
+        print("\n Instructions pour l'utilisateur final:")
         print("1. git clone ou télécharger le ZIP")
         print("2. python install.py")
         print("3. python launcher.py")
     else:
-        print("\n❌ Des corrections sont nécessaires avant le partage.")
-        print("\n🛠️ Actions recommandées:")
+        print("\n Des corrections sont nécessaires avant le partage.")
+        print("\n Actions recommandées:")
         print("- Exécuter: python install.py")
         print("- Vérifier les imports manquants")
         print("- Relancer ce script de vérification")
